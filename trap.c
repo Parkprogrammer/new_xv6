@@ -14,6 +14,7 @@ extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
 
+
 void
 tvinit(void)
 {
@@ -30,6 +31,22 @@ void
 idtinit(void)
 {
   lidt(idt, sizeof(idt));
+}
+
+/* MY CODE */
+void page_fault_handler(struct trapframe *tf) {
+    uint fault_addr = rcr2();
+    pte_t *pte = walkpgdir(myproc()->pgdir, (void *)fault_addr, 0);
+
+    if (pte && !(*pte & PTE_P)) {
+        if (is_swapped_out(fault_addr)) {
+            swap_in(fault_addr);
+        } else {
+            cprintf("pid %d %s: page fault at 0x%x with no mapping\n",
+                    myproc()->pid, myproc()->name, fault_addr);
+            myproc()->killed = 1;
+        }
+    }
 }
 
 //PAGEBREAK: 41
@@ -76,6 +93,11 @@ trap(struct trapframe *tf)
     cprintf("cpu%d: spurious interrupt at %x:%x\n",
             cpuid(), tf->cs, tf->eip);
     lapiceoi();
+    break;
+
+  /* MY CODE */
+  case T_PGFLT:
+    page_fault_handler(tf);
     break;
 
   //PAGEBREAK: 13

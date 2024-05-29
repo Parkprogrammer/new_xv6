@@ -21,6 +21,8 @@ struct {
   struct spinlock lock;
   int use_lock;
   struct run *freelist;
+  struct lru_node *lru_head; 
+  struct swap_bitmap swapmap;
 } kmem;
 
 struct page pages[PHYSTOP/PGSIZE];
@@ -38,6 +40,7 @@ kinit1(void *vstart, void *vend)
 {
   initlock(&kmem.lock, "kmem");
   kmem.use_lock = 0;
+  kmem.lru_head = 0;
   freerange(vstart, vend);
 }
 
@@ -77,6 +80,10 @@ kfree(char *v)
   r = (struct run*)v;
   r->next = kmem.freelist;
   kmem.freelist = r;
+  
+  /* MY CODE */
+  // remove_from_lru(find_lru_node(V2P(v)));
+
   if(kmem.use_lock)
     release(&kmem.lock);
 }
@@ -95,6 +102,11 @@ kalloc(void)
   r = kmem.freelist;
 //  if(!r && reclaim())
 //	  goto try_again;
+  if (!r) {
+    if (clock_algorithm()) { 
+      r = kmem.freelist;
+    }
+  }
   if(r)
     kmem.freelist = r->next;
   if(kmem.use_lock)

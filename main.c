@@ -33,6 +33,10 @@ main(void)
   ideinit();       // disk 
   startothers();   // start other processors
   kinit2(P2V(4*1024*1024), P2V(PHYSTOP)); // must come after startothers()
+  /* MY CODE */
+  init_swap_bitmap(); // 스왑 비트맵 초기화
+  init_swap();        // 스왑 테이블 초기화
+  init_lru();         // LRU 리스트 초기화
   userinit();      // first user process
   mpmain();        // finish this processor's setup
 }

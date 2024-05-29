@@ -10,6 +10,8 @@ struct sleeplock;
 struct stat;
 struct superblock;
 
+typedef uint pte_t;
+
 // bio.c
 void            binit(void);
 struct buf*     bread(uint, uint);
@@ -52,8 +54,8 @@ struct inode*   nameiparent(char*, char*);
 int             readi(struct inode*, char*, uint, uint);
 void            stati(struct inode*, struct stat*);
 int             writei(struct inode*, char*, uint, uint);
-void swapread(char* ptr, int blkno);
-void swapwrite(char* ptr, int blkno);
+void            swapread(char* ptr, int blkno);
+void            swapwrite(char* ptr, int blkno);
 
 // ide.c
 void            ideinit(void);
@@ -173,6 +175,7 @@ void            uartintr(void);
 void            uartputc(int);
 
 // vm.c
+pte_t*          walkpgdir(pde_t *, const void *, int);
 void            seginit(void);
 void            kvmalloc(void);
 pde_t*          setupkvm(void);
@@ -187,6 +190,21 @@ void            switchuvm(struct proc*);
 void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
+struct          lru_node* find_lru_node(uint);
+void            init_swap_bitmap();
+void            init_swap();
+void            init_lru();
+void            add_to_lru(uint, pte_t *);
+void            remove_from_lru(struct lru_node *); 
+void            swap_in(uint);
+int             swap_out(uint);
+int             clock_algorithm();
+int             is_swapped_out(uint);
+void            set_bitmap(int);
+void            clear_bitmap(int);
+void            allocate_user_memory(uint);
+void            deallocate_user_memory(uint);
+
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

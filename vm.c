@@ -32,7 +32,7 @@ seginit(void)
 // Return the address of the PTE in page table pgdir
 // that corresponds to virtual address va.  If alloc!=0,
 // create any required page table pages.
-static pte_t *
+pte_t *
 walkpgdir(pde_t *pgdir, const void *va, int alloc)
 {
   pde_t *pde;
@@ -244,6 +244,12 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       kfree(mem);
       return 0;
     }
+    /* MY CODE */
+    pte_t *pte = walkpgdir(pgdir, (void*)a, 0);
+    if (!pte) {
+      panic("allocuvm: page table entry not found after mappages");
+    }
+    add_to_lru(a, pte);
   }
   return newsz;
 }
@@ -273,6 +279,8 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       char *v = P2V(pa);
       kfree(v);
       *pte = 0;
+      /* MY CODE */
+      remove_from_lru(find_lru_node(a)); 
     }
   }
   return newsz;
@@ -383,6 +391,163 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
     va = va0 + PGSIZE;
   }
   return 0;
+}
+
+/* MY CODE */
+struct swap_bitmap swapmap;
+struct lru_node lru_head;
+struct swap_entry swap_table[MAX_SWAP_PAGES];
+
+struct lru_node* find_lru_node(uint va) {
+    struct lru_node *current = lru_head.next;
+    // cprintf("\nEntering find_lru\n");
+    while (current != &lru_head) {
+        if (current->va == va) {
+            return current;
+        }
+        current = current->next;
+        
+    }
+    
+    return 0; // 0?
+}
+
+
+void init_swap_bitmap() {
+    memset(swapmap.bits, 0, sizeof(swapmap.bits));
+}
+
+void init_swap() {
+    memset(swap_table, 0, sizeof(swap_table));
+}
+
+void init_lru() {
+    lru_head.prev = &lru_head;
+    lru_head.next = &lru_head;
+}
+
+void add_to_lru(uint va, pte_t *pte) {
+    
+    if (!pte) {
+        panic("add_to_lru: NULL pte");
+    }
+    
+    // if (find_lru_node(va)) {
+    //     cprintf("VA %d is already in LRU list\n", va);
+    //     return;
+    // }
+
+    struct lru_node *node = (struct lru_node*)kalloc();
+    if (!node) {
+        panic("LRU list node allocation failed");
+    }
+    
+    // cprintf("\nADDED ALLOCVM in LRU LIST in VA: %d\n",va);
+    node->va = va;
+    node->pte = pte;  // 저장하고자 하는 pte를 리스트 노드에 저장
+    node->next = lru_head.next;
+    node->prev = &lru_head;
+    lru_head.next->prev = node;
+    lru_head.next = node;
+}
+
+void remove_from_lru(struct lru_node *node) {
+    node->prev->next = node->next;
+    node->next->prev = node->prev;
+    kfree((char*)node);
+}
+
+int clock_algorithm() {
+    struct lru_node *current = lru_head.next, *next;
+    int reclaimed = 0; 
+
+    while (current != &lru_head) {
+        next = current->next;
+        if (!(*current->pte & PTE_A)) { 
+            if (swap_out(current->va) == 1) {
+                remove_from_lru(current);
+                kfree((char*)current);
+                reclaimed = 1; 
+            }
+        } else { 
+            *current->pte &= ~PTE_A; 
+        }
+        current = next;
+    }
+
+    return reclaimed; 
+}
+
+
+void swap_in(uint va) {
+    pte_t *pte = walkpgdir(myproc()->pgdir, (void *)va, 0);
+    if (pte && !(*pte & PTE_P)) {
+        int swap_index = PTE_ADDR(*pte) >> 12;
+        char *physical_addr = kalloc();
+        if (!physical_addr) {
+            panic("swap_in: kalloc failed");
+        }
+        swapread(physical_addr, swap_index);
+        *pte = V2P(physical_addr) | (PTE_FLAGS(*pte) | PTE_P);
+        swap_table[swap_index].swapped_out = 0;
+        add_to_lru(va, pte);
+    }
+}
+
+int swap_out(uint va) {
+    pte_t *pte = walkpgdir(myproc()->pgdir, (void *)va, 0);
+    if (pte && (*pte & PTE_P) && !(*pte & PTE_A)) {
+        // Find a free swap slot
+        int swap_index = -1;
+        for (int i = 0; i < MAX_SWAP_PAGES; i++) {
+            if (!swap_table[i].swapped_out) {
+                swap_index = i;
+                swap_table[i].swapped_out = 1;  // Mark this swap slot as used
+                break;
+            }
+        }
+        if (swap_index == -1) {
+            return -1; // No swap space available
+        }
+
+        char *physical_addr = P2V(PTE_ADDR(*pte));
+        swapwrite(physical_addr, swap_index);
+        *pte = (swap_index << 12) | (PTE_FLAGS(*pte) & ~PTE_P);  // Clear PTE_P
+        kfree(physical_addr);
+        return 1;
+    }
+    return 0; // No action taken
+}
+
+int is_swapped_out(uint va) {
+    for (int i = 0; i < MAX_SWAP_PAGES; i++) {
+        if (swap_table[i].va == va && swap_table[i].swapped_out) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+
+void set_bitmap(int index) {
+    swapmap.bits[index / 8] |= (1 << (index % 8));
+}
+
+void clear_bitmap(int index) {
+    swapmap.bits[index / 8] &= ~(1 << (index % 8));
+}
+
+void allocate_user_memory(uint va) {
+    pte_t *pte = walkpgdir(myproc()->pgdir, (void*)va, 1);
+    if (!pte) panic("Memory allocation failed");
+    add_to_lru(va, pte);
+}
+
+void deallocate_user_memory(uint va) {
+    pte_t *pte = walkpgdir(myproc()->pgdir, (void*)va, 0);
+    if (pte && (*pte & PTE_P)) {
+        remove_from_lru(find_lru_node(va));
+    }
 }
 
 //PAGEBREAK!

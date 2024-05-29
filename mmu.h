@@ -95,6 +95,8 @@ struct segdesc {
 #define PTE_W           0x002   // Writeable
 #define PTE_U           0x004   // User
 #define PTE_PS          0x080   // Page Size
+/* MY CODE */
+#define PTE_A           0x20    // Acessed
 
 // Address in page table or page directory entry
 #define PTE_ADDR(pte)   ((uint)(pte) & ~0xFFF)
@@ -185,6 +187,28 @@ struct page{
 	char *vaddr;
 };
 
+/* MY CODE */
+#define SWAPSIZE 4096
 
+struct swap_bitmap {
+    char bits[SWAPSIZE / 8]; // SWAPSIZE / 8
+};
+
+struct lru_node {
+    struct lru_node *prev;
+    struct lru_node *next;
+    uint va;
+    pte_t *pte; 
+};
+
+#define MAX_SWAP_PAGES 1024
+
+struct swap_entry {
+    uint va;
+    int swapped_out;
+};
+
+
+// struct swap_bitmap swapmap;
 
 #endif
